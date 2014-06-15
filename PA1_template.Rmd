@@ -1,20 +1,195 @@
-# Reproducible Research: Peer Assessment 1
+Reproducible Research 
+========================================================
 
+# Peer Assessment 1 Assignment
 
-## Loading and preprocessing the data
+## Loading and processing the data
 
+Here we assume that **activity.csv** is in the current working directory, then use *read.csv()* to read 
+data from this file, and storing into *activity* variable.
+
+Since reading is usually a resource intensive task, this operation is being cached.
+
+```{r reading, cache=TRUE}
+activity <- read.csv(file="activity.csv", header=TRUE)
+```
+
+Then, let's check the first rows of data.
+
+*Note: Assume xtable is already installed.*
+
+```{r reading.check, results="asis"}
+# using results="asis"
+library(xtable)
+xt <- xtable(head(activity))
+print(xt, type="html", NA.string="<font color=\"red\">NA</font>")
+```
+
+Before proceeding, let's check the structure of *activity*:
+
+```{r check.structure}
+str(activity)
+```
+
+We need to adjust the date column from Factor to a more appropriate type:
+```{r transform.factor2date}
+activity <- transform(activity, date = strptime(date, format="%Y-%m-%d"))
+str(activity)
+```
+
+Now it looks okay:
+
+*Note: xtable misinterprets date class, let's use plain R formatting*
+```{r reading.check2}
+print(head(activity))
+```
 
 
 ## What is mean total number of steps taken per day?
 
+First, let's remove *NA* values:
 
+```{r filter.NA}
+activity.filter <- activity[!(is.na(activity$steps)),]
+dim(activity)
+dim(activity.filter)
+```
+
+Let's make a histogram of the total number of steps taken each day:
+
+```{r hist.steps, fig.width=10}
+plot(activity.filter$date, activity.filter$steps, type="h", xlab="date", ylab="steps")
+```
+
+Now let's calculate the mean and median total number of steps per day
+
+```{r mean.median, results='asis'}
+# using results="asis"
+steps.means <- aggregate(steps ~ as.character(date), data=activity.filter, FUN=mean)
+names(steps.means) <- c("date", "steps")
+
+steps.medians <- aggregate(steps ~ as.character(date), data=activity.filter, FUN=median)
+names(steps.medians) <- c("date", "steps")
+
+xt <- xtable(steps.means)
+print(xt, type="html")
+xt <- xtable(steps.medians)
+print(xt, type="html")
+```
 
 ## What is the average daily activity pattern?
 
 
+Let's make a time series plot (i.e. type = "l") of the 5-minute interval (x-axis)
+and the average number of steps taken, averaged across all days (y-axis), then let's identify
+which 5-minute interval, on average across all the days in the dataset, contains the maximum number of steps.
+
+```{r steps.by.interval}
+steps.means.interval <- aggregate(steps ~ interval, data=activity, FUN=mean)
+plot(x=steps.means.interval$interval, y=steps.means.interval$steps, type="l", xlab="interval", ylab="steps")
+
+steps.means.interval.peak <- steps.means.interval[steps.means.interval$steps == max(steps.means.interval$steps),]
+with(steps.means.interval.peak, points(interval, steps, pch=8, col="red"))
+
+print(steps.means.interval.peak)
+```
+
+The point marked in red above represents the highest average of **`r steps.means.interval.peak$steps`** steps
+at the **`r steps.means.interval.peak$interval`** interval (hhmm).
 
 ## Imputing missing values
 
+Let's calculate and report the total number of missing values in the dataset:
+
+```{r report.nas}
+table(is.na(activity$steps))
+```
+
+Then let's fill these *NA*s with the average value of steps for that interval, in a copy of our dataset:
+```{r fill.nas}
+activity.new <- activity
+for ( i in 1:nrow(activity) ) {
+    if ( is.na(activity[i,]$steps) ) {
+        steps <- steps.means.interval[steps.means.interval$interval == activity[i,]$interval,]$steps
+        activity.new[i,]$steps <- steps
+    }
+}
+table(is.na(activity$steps))
+```
+
+Let's compare our previous histogram with one with the filled data
+
+```{r fill.nas.histogram, fig.width=15}
+par(mfrow=c(1,2))
+plot(activity.filter$date, activity.filter$steps, type="h", main="original", xlab="date", ylab="steps")
+plot(activity.new$date, activity.new$steps, type="h", main="filled", xlab="date", ylab="steps")
+```
+
+Now let's calculate the mean and median total number of steps per day with the imputed data
+
+```{r mean.median.compare, results='asis'}
+# using results="asis"
+steps.means.new <- aggregate(steps ~ as.character(date), data=activity.new, FUN=mean)
+names(steps.means.new) <- c("date", "steps")
+
+steps.medians.new <- aggregate(steps ~ as.character(date), data=activity.new, FUN=median)
+names(steps.medians.new) <- c("date", "steps")
+
+steps.means.compare <- merge(steps.means, steps.means.new, by="date", suffixes=c(".original",".filled"))
+steps.medians.compare <- merge(steps.medians, steps.medians.new, by="date", suffixes=c(".original",".filled"))
+
+xt <- xtable(steps.means.compare)
+print(xt, type="html")
+xt <- xtable(steps.medians.compare)
+print(xt, type="html")
+```
+
+Let's check:
+
+1. Do these values differ from the estimates from the first part of the assignment?
+
+2. What is the impact of imputing missing data on the estimates of the total daily number of steps?
+
+```{r check.compare}
+with(steps.means.compare, table(steps.original - steps.filled))
+with(steps.medians.compare, table(steps.original - steps.filled))
+```
+
+It's possible to see that, though the histogram shows the extra values for the imputed data, 
+the average and medians per day are not affected by the imputed values
 
 
 ## Are there differences in activity patterns between weekdays and weekends?
+
+*Note: For this step I need to set the locale, because my environment is not in english*
+```{r locale}
+Sys.setlocale(category = "LC_ALL", locale = "C")
+```
+
+Let's create a new factor variable in the dataset with two levels - "weekday" and "weekend" indicating whether a given date is a weekday or weekend day.
+
+```{r create.factors}
+wday.type <- function(wday) {
+    if (wday == "Sat" | wday == "Sun") {
+        return("weekend")
+    } else {
+        return("weekday")
+    }
+}
+
+wday <- weekdays(strptime(activity.new$date,format="%Y-%m-%d"), abbreviate=T)
+
+weektype <- sapply(wday, wday.type)
+
+activity.new$weektype <- as.factor(weektype)
+```
+
+Then, let's make a panel plot containing a time series plot (i.e. type = "l") of the 5-minute interval (x-axis) and the average number of steps taken, averaged across all weekday days or weekend days (y-axis).
+
+*Note: assume ggplot2 package is installed*
+
+```{r weekend.weekdays.plot, fig.width=10}
+library(ggplot2)
+mean.interval.weektype <- aggregate(steps ~ interval + weektype, data=activity.new, FUN=mean)
+qplot(x=interval, y=steps, data=mean.interval.weektype, facets=weektype~., geom="line")
+```
